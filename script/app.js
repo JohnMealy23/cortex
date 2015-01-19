@@ -1,4 +1,33 @@
-window['playingField'] = [];
+var $config = {
+	breakPoints: {
+		high: 10,
+		low: -1
+	},
+	directions: ['east','west,','north','south'],
+	neighbors: {
+		near: {
+			e: [1,0],			
+			w: [-1,0],			
+			n: [0,1],			
+			s: [0,-1],			
+			ne: [1,1],			
+			nw: [-1,1],			
+			se: [1,-1],			
+			sw: [-1,-1],			
+		},
+		far: {
+			e: [1,0],			
+			w: [-1,0],			
+			n: [0,1],			
+			s: [0,-1],			
+			ne: [1,1],			
+			nw: [-1,1],			
+			se: [1,-1],			
+			sw: [-1,-1],			
+		}
+	},
+	dimensionTypes: ['x','y','z']
+};
 
 var Cortex = function() {
 	"use strict";
@@ -7,53 +36,9 @@ var Cortex = function() {
 	cortex.Column = function(coords) {
 		var self = this;
 		var counter = 0;
-			
-		self.neighbors = function() {
-			this.east = function() {
-				var xyz = {};
-				var newCoord = getNeighbor(coords.x,1);
-				if(!newCoord) {
-					delete this;
-					return;
-				}
-				xyz.x = newCoord;
-				xyz.y = coords.y;
-				xyz.z = coords.z;
-				return xyz;
-			};
-			this.west = {
-				x : getNeighbor(coords.x,-1),
-				y : coords.y,
-				z : coords.z
-			};
-			this.north = {
-				x : coords.x,
-				y : getNeighbor(coords.y,1),
-				z : coords.z
-			};
-			this.south = {
-				x : coords.x,
-				y : getNeighbor(coords.y,-1),
-				z : coords.z
-			};
-			this.up = {
-				x : coords.x,
-				y : coords.y,
-				z : getNeighbor(coords.z,1),
-			};
-			this.down = {
-				x : coords.x,
-				y : coords.y,
-				z : getNeighbor(coords.z,-1),
-			};
-			// function getNeighbor(coor, val) {
-				// var newCoord = (coor + val) > -1 ? coor + val : null;
-				// return newCoord;
-			// }
-		};
-		function makeNeighbors(coords) {
-			var dirs = ['east','west,','north','south','up','down'];
-			var dims = ['x','y','z'];
+
+		// Get surrounding nodes:	
+		self.neighbors = (function makeNeighbors() {
 			var i;
 			var a;
 			var mi;
@@ -78,30 +63,80 @@ var Cortex = function() {
 				};
 			})();
 			var mutate = function(x) {
-				return x + oscillate();
+				var newCoord = x + oscillate();
+				if(newCoord > $config.breakPoints.low && newCoord < $config.breakPoints.high) {
+					return newCoord;
+				} else {
+					return false;
+				}
 			};
-			for(i=0;i<dirs.length;i++) {
-				self.neighbors[dirs[i]] = {};
+			for(i=0;i<$config.directions.length;i++) {
 				mi = mutationInterval();
-				neighborArray[dirs[i]] = {};
-				for(a=0;a<dims.length;a++) {
-					neighborArray[dirs[i]][dims[a]] = mi === a ? mutate(coords[dims[a]]) : coords[dims[a]];
+				neighborArray[$config.directions[i]] = {};
+				for(a=0;a<$config.dimensionTypes.length;a++) {
+					if(mi === a) {
+						neighborArray[$config.directions[i]][$config.dimensionTypes[a]] = mutate(coords[$config.dimensionTypes[a]]);
+						if(neighborArray[$config.directions[i]][$config.dimensionTypes[a]] === false) {
+							neighborArray[$config.directions[i]] = null;
+							break;
+						}
+					} else {
+						neighborArray[$config.directions[i]][$config.dimensionTypes[a]] = coords[$config.dimensionTypes[a]];
+					} 
 				}
 			}
 			return neighborArray;
-		}		
+		})($config, coords);	
 		
-		self.propogation = function() {
+		// console.log(self.neighbors);
+		
+		self.propagation = function() {
 			var i;
+			var j = 0;
+			var iLength;
+			var jLength;
+			var x;
+			var y;
+			var z;
+			var positionArray = [];
+			var neighborhood = self.neighbors;
 			// var neighborhood = new self.neighbors;
-			var neighborhood = makeNeighbors(coords);
-			var neighborKeys = Object.keys(neighborhood);
-			var curNeighbor;
-			for(i=0;i<neighborKeys.length;i++) {
-				curNeighbor = neighborhood[neighborKeys[i]];
-				console.log(curNeighbor());
-			}
-			
+			for(i=0, iLength = $config.directions.length; i < iLength; i++) {
+				// for each neighbor...
+				
+				if(neighborhood[$config.directions[i]]) {				
+					x = neighborhood[$config.directions[i]][$config.dimensionTypes[0]];
+					y = neighborhood[$config.directions[i]][$config.dimensionTypes[1]];
+					z = neighborhood[$config.directions[i]][$config.dimensionTypes[2]];
+				                              
+				// for(j = 0, jLength = $config.dimensionTypes.length; j<jLength; j++) {
+					if(!window.Cortex.grid === undefined) {
+						window.Cortex.grid = [];
+					} 
+					if(window.Cortex.grid[x] === undefined) {
+						window.Cortex.grid[x] = [];
+					}
+					if(window.Cortex.grid[x][y] === undefined) {
+						window.Cortex.grid[x][y] = [];
+					}
+					if(window.Cortex.grid[x][y][z] === undefined) {
+						window.Cortex.grid[x][y][z] = {};
+						var stuff = new cortex.Column(neighborhood[$config.directions[i]]);
+						window.Cortex.grid[x][y][z] = stuff;
+					} else {
+						// window.Cortex.grid[x][y][z].checkin();
+					}
+				// }
+				
+					// window.Cortex.grid[neighborArray[$config.directions[i];
+				
+				
+					// for(i=0;i<$config.directions.length;i++) {
+						// x = self.neighbors[$config.directions[i]];
+						// console.log(curNeighbor());
+					// }
+				}
+			}			
 			
 			// 1. Create base
 			// 2. Detect base has been created by coords x and y respectively reaching 0 
@@ -121,10 +156,7 @@ var Cortex = function() {
 			// Create siblings
 		};
 		
-		self.propogation();
-		
-		
-		
+		self.propagation();
 		
 		
 		self.levels = [];
@@ -190,10 +222,10 @@ var Cortex = function() {
 				if(fromAbove && fromBelow) {
 					if(fromAbove == fromBelow) {
 						alert("Pattern recognized");
-						window['Cortex'][self.childAddress[i].x][self.childAddress[i].y][self.childAddress[i].z](fromBelow);
+						window['Cortex'].grid[self.childAddress[i].x][self.childAddress[i].y][self.childAddress[i].z](fromBelow);
 					} else {
 						alert("Pattern not recognized");
-						window['Cortex'][self.parentAddress.x][self.parentAddress.y][self.parentAddress.z](fromBelow);
+						window['Cortex'].grid[self.parentAddress.x][self.parentAddress.y][self.parentAddress.z](fromBelow);
 					}
 				}
 			}
@@ -225,7 +257,7 @@ var Cortex = function() {
 };
 window['Cortex'] = new Cortex();
 
-var dims = {x:50,y:50,z:50};
+var dims = {x:5,y:5,z:5};
 
 function buildCortex(dims) {
 	var cube = [];
@@ -260,8 +292,6 @@ function buildCortex(dims) {
 	console.log(cube);
 	return cube;
 }
-var cube = buildCortex(dims);
+// var cube = buildCortex(dims);
 
-
-
-
+// window['Cortex'].propagate();
