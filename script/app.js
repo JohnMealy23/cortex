@@ -1,6 +1,6 @@
 var $config = {
 	breakPoints: {
-		high: 9,
+		high: 25,
 		low: -1
 	},
 	neighbors: {
@@ -24,6 +24,7 @@ var Cortex = function() {
 		var self = this;
 		var counter = 0;
 		$coords = $coords || {x:0,y:0,z:0};
+		console.log($coords.x + "#" + $coords.y + "#" + $coords.z);
 
 		// Get surrounding nodes:	
 		var neighbors = function(coords) {
@@ -32,26 +33,24 @@ var Cortex = function() {
 			var y;
 			var z;
 			var iLength;
-			var neighborKeys = Object.keys($config.neighbors);
+			this.initNeighborKeys = Object.keys($config.neighbors);
+			this.neighborKeys = [];
 			this.neighbors = {};
-			for(i=0, iLength = neighborKeys.length; i < iLength; i++) {
-				this.neighbors[neighborKeys[i]] = {};
-				x = coords.x + $config.neighbors[neighborKeys[i]][0];
-				if(x > $config.breakPoints.low && x < $config.breakPoints.high) {
-					this.neighbors[neighborKeys[i]].x = x;
-				} else {
-					this.neighbors[neighborKeys[i]] = null;
-					continue;
+			for(i=0, iLength = this.initNeighborKeys.length; i < iLength; i++) {
+				x = coords.x + $config.neighbors[this.initNeighborKeys[i]][0];
+				y = coords.y + $config.neighbors[this.initNeighborKeys[i]][1];
+				if(x > $config.breakPoints.low && 
+					x < $config.breakPoints.high &&
+					y > $config.breakPoints.low && 
+					y < $config.breakPoints.high) 
+				{
+					this.neighbors[this.initNeighborKeys[i]] = {};
+					this.neighbors[this.initNeighborKeys[i]].x = x;
+					this.neighbors[this.initNeighborKeys[i]].y = y;
+					this.neighbors[this.initNeighborKeys[i]].z = coords.z;
+					this.neighbors[this.initNeighborKeys[i]].confirmed = false;
+					this.neighborKeys.push(this.initNeighborKeys[i]);
 				}
-				y = coords.y + $config.neighbors[neighborKeys[i]][1];
-				if(y > $config.breakPoints.low && y < $config.breakPoints.high) {
-					this.neighbors[neighborKeys[i]].y = y;
-				} else {
-					this.neighbors[neighborKeys[i]] = null;
-					continue;
-				}
-				
-				this.neighbors[neighborKeys[i]].z = coords.z;
 			}
 			this.parent = {
 				x: Math.round(coords.x/2),
@@ -61,54 +60,124 @@ var Cortex = function() {
 			this.children = [];
 		};
 		self.neighborhood = new neighbors($coords);
-		self.registerChild = function(childCoords) {
-			var totalChildren = self.neighbors.children.push(childCoords);
-			if(totalChildren === 4){
-				cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].propagate.up();
-			}
-		};
+		self.connections = new getConnections();
+		self.connections.checkNeighbors();
 		self.propagate = {
 			sideways : function () {
 				var i;
 				var j;
-				var neighborKeys = Object.keys(self.neighborhood.neighbors);
+				var neighborKeys = self.neighborhood.neighborKeys;
 				var totalNeighbors = neighborKeys.length;
 				var totalDimTypes = $config.dimensionTypes.length;
 				var neighborCoords = {};
 				var positionArray = [];
-				
 				// Deal with the peers:
 				for(i=0; i < totalNeighbors; i++) {
 					// for each neighbor address 
 					if(self.neighborhood.neighbors[neighborKeys[i]] !== null) {
+						neighborCoords[neighborKeys[i]] = {};
 						for(j=0; j < totalDimTypes; j++) {
-							neighborCoords[neighborKeys[i]]= self.neighborhood.neighbors[neighborKeys[i]][$config.dimensionTypes[j]];
+							neighborCoords[neighborKeys[i]][$config.dimensionTypes[j]] = self.neighborhood.neighbors[neighborKeys[i]][$config.dimensionTypes[j]];
 						}
-						if(cortex.grid[neighborCoords.x] === undefined) {
-							cortex.grid[neighborCoords.x] = [];
+						if(cortex.grid[neighborCoords[neighborKeys[i]].x] === undefined) {
+							cortex.grid[neighborCoords[neighborKeys[i]].x] = [];
 						}
-						if(cortex.grid[neighborCoords.x][neighborCoords.y] === undefined) {
-							cortex.grid[neighborCoords.x][neighborCoords.y] = [];
+						if(cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y] === undefined) {
+							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y] = [];
 						}
-						if(cortex.grid[neighborCoords.x][neighborCoords.y][neighborCoords.z] === undefined) {
-							cortex.grid[neighborCoords.x][neighborCoords.y][neighborCoords.z] = {};
-							cortex.grid[neighborCoords.x][neighborCoords.y][neighborCoords.z] = new cortex.Column(self.neighborhood[neighborKeys[i]]);
-							cortex.grid[neighborCoords.x][neighborCoords.y][neighborCoords.z].propagate.sideways();
+						if(cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] === undefined) {
+							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] = {};
+							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] = new cortex.Column(neighborCoords[neighborKeys[i]]);
+							if(self.helpers.isNodeThere(neighborCoords[neighborKeys[i]], true)) {
+								cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z].propagate.sideways();
+							} else {
+								setTimeout(self.propagate.sideways,10);
+							}
 						}
 					}
 				}
 			},
 			// Deal with the parents
 			up: function() {
-				if(cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z] !== undefined) {
-					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].registerChild($coords);
+				if(self.helpers.isNodeThere(self.neighborhood.parent) &&
+				self.helpers.isNodeThere(self.neighborhood.parent, true)) {
+					// If parent node is built out and ready, register this child with it.
+					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].connections.registerChild($coords);
+				} else if(self.helpers.isNodeThere(self.neighborhood.parent)) {
+					// If the parent node is currently building, wait a moment, then try again.
+					setTimeout(function() {self.propagate.up();}, 10);
 				} else {
+					
+					if(!cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y]) {
+						console.log("errer:", self.neighborhood.parent);
+					}
+					
+					
+					
+					
+					// If no column is started, get it started.
 					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z] = new cortex.Column(self.neighborhood.parent);
+					setTimeout(function() {self.propagate.up();}, 10);
 				}
 			}
 		};
-		
-		
+		function getConnections() {
+			var connections = this;
+			var connectionCycle = {};
+			var neighbors = self.neighborhood.neighbors;
+			var neighborKeys = self.neighborhood.neighborKeys;
+			var totalUnconfirmedNeighbors = neighborKeys.length;
+			connections.checkNeighbors = function() {
+				var g;
+				for(g = 0; g < totalUnconfirmedNeighbors; g++) {
+					(function(g) {
+						var timeout = 10;
+						var cycleCount = 0;
+						connectionCycle[neighborKeys[g]] = setInterval(function() {
+							if(self.helpers.isNodeThere(neighbors[neighborKeys[g]])) {
+								self.neighborhood.neighbors[neighborKeys[g]].confirmed = true;
+								if(checkinComplete()) {
+									self.propagate.up();
+								}
+								clearInterval(connectionCycle[neighborKeys[g]]);
+							} else if(timeout < cycleCount) {
+								clearInterval(connectionCycle[neighborKeys[g]]);
+							}
+							cycleCount++;
+						},300);
+					}).call(this,g);
+				}
+				//TODO: Set timeout to clear all remaining setIntervals
+				//TODO: Alternatively, just wait until word comes from above to shut 'em down.
+				
+				function checkinComplete() {
+					totalUnconfirmedNeighbors--;
+					if(totalUnconfirmedNeighbors === 0) {
+						return true;
+					}
+					return false;
+				}
+			};
+			connections.registerChild = function(neighborCoords) {
+				self.neighborhood.children.push(neighborCoords);
+				if(self.neighborhood.children.length === 4){
+					// cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].propagate.up();
+					self.propagate.up();
+				}
+				
+				// TODO: When to cut extraneous/incomplete parents?
+			};
+		};
+		self.helpers = {
+			isNodeThere : function(coords, isColumn) {
+				if(isColumn && cortex.grid[coords.x] !== undefined && cortex.grid[coords.x][coords.y] !== undefined && cortex.grid[coords.x][coords.y][coords.z] instanceof cortex.Column) { 
+					return true;
+				} else if(cortex.grid[coords.x] !== undefined && cortex.grid[coords.x][coords.y] !== undefined && cortex.grid[coords.x][coords.y][coords.z] !== undefined) { 
+					return true;
+				}
+				return false; 
+			}
+		};
 		
 		self.levels = [];
 		self.Pattern = function(data, direction){
