@@ -1,8 +1,7 @@
 var dupObj = {};
-var output = "";
 var $config = {
 	breakPoints: {
-		high: 24,
+		high: 98,
 		low: -1
 	},
 	neighbors: {
@@ -77,12 +76,12 @@ var Cortex = function() {
 	cortex.Column = function($coords) {
 		"use strict";
 		var self = this;
-		var data = {};		
-		
-		self.helpers = $helpers;
 		// Easy external access for node coords:
 		self.coords = $coords;
-		
+		// Object to hold build mechanisms:
+		self.build = {};
+		// Object for routing incoming data:
+		self.router = {};		
 		// Get surrounding nodes:	
 		self.neighborhood = (function(coords) {
 			"use strict";
@@ -107,6 +106,7 @@ var Cortex = function() {
 						--countDown;
 						if(countDown === 0 && hood.children.length === 1) {
 							hood.hippocampus = true;
+							logIt();
 						}
 					};
 				})();
@@ -136,7 +136,7 @@ var Cortex = function() {
 										// Timeout ran down. No neighbor found. Discontinue search.
 										delete sibs[initNeighborKeys[i]];
 										amITheHippocampus();
-									} else if(!self.helpers.isNodeThere(sibs[initNeighborKeys[i]])) {
+									} else if(!$helpers.isNodeThere(sibs[initNeighborKeys[i]])) {
 										// If no node found yet, and time isn't up, check again:
 										neighborCheckIntervol();
 									}
@@ -151,18 +151,18 @@ var Cortex = function() {
 			})();
 			return hood;
 		})(this.coords);
-		self.connections = (function() {
+		self.build.connections = (function() {
 			var connections = {};
 			connections.registerChild = function(childCoords) {
 				self.neighborhood.children.push(childCoords);
 				if(self.neighborhood.children.length === 4){
-					self.propagate.up();
+					self.build.propagate.up();
 				}
 // TODO: When to cut extraneous/incomplete parents?
 			};
 			return connections;
 		})();
-		self.propagate = {
+		self.build.propagate = {
 			sideways : function () {
 				var i;
 				var j;
@@ -188,12 +188,12 @@ var Cortex = function() {
 						if(cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] === undefined) {
 							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] = {};
 							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] = new cortex.Column(neighborCoords[neighborKeys[i]]);
-							if(self.helpers.isNodeThere(neighborCoords[neighborKeys[i]], true)) {
-								cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z].propagate.sideways();
-								cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z].propagate.up();
+							if($helpers.isNodeThere(neighborCoords[neighborKeys[i]], true)) {
+								cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z].build.propagate.sideways();
+								cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z].build.propagate.up();
 							} else {
 								alert("Rare case. Node hadn't finished building before being called - 1");
-								setTimeout(self.propagate.sideways,10);
+								setTimeout(self.build.propagate.sideways,10);
 							}
 						}
 					}
@@ -201,78 +201,80 @@ var Cortex = function() {
 			},
 			// Deal with the parents
 			up: function() {
-				if(self.helpers.isNodeThere(self.neighborhood.parent) &&
-				self.helpers.isNodeThere(self.neighborhood.parent, true)) {
+				if($helpers.isNodeThere(self.neighborhood.parent) &&
+				$helpers.isNodeThere(self.neighborhood.parent, true)) {
 					// If parent node is built out and ready, register this child with it.
-					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].connections.registerChild(self.coords);
-				} else if(self.helpers.isNodeThere(self.neighborhood.parent)) {
+					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].build.connections.registerChild(self.coords);
+				} else if($helpers.isNodeThere(self.neighborhood.parent)) {
 					// If the parent node is currently building, wait a moment, then try again.
-					// self.propagate.up();
 					alert("Rare case. Node hadn't finished building before being called - 0");
+					self.build.propagate.up();
 				} else {
 					// If no column is started, get it started.
 					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z] = new cortex.Column(self.neighborhood.parent);
-					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].connections.registerChild(self.coords);
-					// self.propagate.up();
+					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].build.connections.registerChild(self.coords);
 				}
 			}
 		};
 
 
+		// Halfast logging:
+		var layerTest = [0,1,2,3,4,5,6];
+		var tally = [];
+		var duh;
+		for(duh=0;duh<layerTest.length;duh++) {
+			if($coords.z == duh) {
+				if(!tally[duh]) {tally[duh] = 0;}
+				output += $helpers.stringifyCoords($coords,"#"); + tally[duh]++ + "<br>";
+			}
+		}
 
 
-		
-		data.counter = 0;
-		data.levels = [];
-		data.Pattern = function(data, direction){
+
+		// Data processing mechanisms:		
+		self.router.counter = 0;
+		self.router.levels = [];
+		self.router.Pattern = function(data, direction){
 			this.direction = direction;
 			this.matched = false;
 			this.currentCoordinates = coordinates;
 			this.data = data;
 		};
-        data.getNextIndex = (function() {
+        self.router.getNextIndex = (function() {
 		   var id = 0;
 		   return function() { return id++; };
 		})();
-		data.purgeColumn = function() {
+		self.router.purgeColumn = function() {
 			for(var i;i < data.totalLevels; i++) {
-				data.level[i].purge();
+				self.router.level[i].purge();
 			}
 		};
-		data.startRhythm = function() {
+		self.router.startRhythm = function() {
 			
 		};
 		// Data entry level
-		data.counter = data.getNextIndex();
-		data.levels[data.counter] =	function(incoming) {
+		self.router.counter = self.router.getNextIndex();
+		self.router.levels[self.router.counter] =	function(incoming) {
 			startTimer();
 			pattern = new Pattern(incoming, 1);
 			this.purge = function() {
 								
 			};
-			data.levels[data.counter + incoming.direction](incoming);
+			self.router.levels[self.router.counter + incoming.direction](incoming);
 		};
 			
-		// // Passes up the pattern
-		// data.counter = data.getNextIndex();
-		// data.levels[data.counter] =	function(incoming) {
-			// this.purge = function() {
-			// };
-			// data.levels[data.counter + incoming.direction](incoming);
-		// };
-	
 		// Passes up the pattern
-		data.counter = data.getNextIndex();
-		data.levels[data.counter] =	function(incoming) {
+		self.router.counter = self.router.getNextIndex();
+		self.router.levels[self.router.counter] =	function(incoming) {
 			this.purge = function() {
 								
 			};
-			data.levels[data.counter + incoming.direction](incoming);
+			self.router.levels[self.router.counter + incoming.direction](incoming);
 		};
 	
 		// Tests if the incoming pattern matches a previous pattern
-		data.counter = data.getNextIndex();
-		data.levels[data.counter] =	function(incoming) {
+		self.router.counter = self.router.getNextIndex();
+		self.router.levels[self.router.counter] =	function(incoming) {
 			var fromBelow = null;
 			var fromAbove = null;
 			this.purge = function() {
@@ -299,28 +301,24 @@ var Cortex = function() {
 			}
 			decide();
 		};
-		data.counter = data.getNextIndex();
-		data.levels[data.counter] =	function(incoming) {
-			data.levels[data.counter + incoming.direction](incoming);
+		self.router.counter = self.router.getNextIndex();
+		self.router.levels[self.router.counter] =	function(incoming) {
+			self.router.levels[self.router.counter + incoming.direction](incoming);
 		};
-		data.counter = data.getNextIndex();
-		data.levels[data.counter] =	function(incoming) {
-			data.levels[data.counter + incoming.direction](incoming);
+		self.router.counter = self.router.getNextIndex();
+		self.router.levels[self.router.counter] =	function(incoming) {
+			self.router.levels[self.router.counter + incoming.direction](incoming);
 		};
-		data.totalLevels = data.getNextIndex() - 1;
+		self.router.totalLevels = self.router.getNextIndex() - 1;
 		
-		// Halfast logging:
-		var layerTest = [0,1,2,3,4,5,6];
-		var tally = [];
-		var duh;
-		for(duh=0;duh<layerTest.length;duh++) {
-			if($coords.z == duh) {
-				if(!tally[duh]) {tally[duh] = 0;}
-				output += $coords.x + "#" + $coords.y + "#" + $coords.z + ":0:" + tally[duh]++ + "<br>";
-			}
-		}
 	};
 	
+};
+
+var output = "";
+function logIt() {
+	document.write(output);
+	 console.log(window.Cortex.grid);
 };
 
 // Init:
@@ -328,10 +326,6 @@ window['Cortex'] = new Cortex();
 window['Cortex'].grid[0] = []; 
 window['Cortex'].grid[0][0] = [];
 window['Cortex'].grid[0][0][0] = new window['Cortex'].Column({x:0,y:0,z:0});
-window['Cortex'].grid[0][0][0].propagate.sideways();
-window['Cortex'].grid[0][0][0].propagate.up();
+window['Cortex'].grid[0][0][0].build.propagate.sideways();
+window['Cortex'].grid[0][0][0].build.propagate.up();
 
-setTimeout(function() {
-	document.write(output);
-	 console.log(window.Cortex.grid);
-},3000);
