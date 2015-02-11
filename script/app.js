@@ -2,7 +2,7 @@ var dupObj = {};
 var output = "";
 var $config = {
 	breakPoints: {
-		high: 98,
+		high: 24,
 		low: -1
 	},
 	neighbors: {
@@ -20,69 +20,153 @@ var $config = {
 var domHelper = function() {
 	
 };
+
 var Cortex = function() {
 	"use strict";
 	var cortex = this;
 	cortex.grid = [];
-	cortex.Column = function($coords) {
-		var self = this;
-		var counter = 0;
-		
-		// Halfast logging:
-		var layerTest = [0,1,2,3,4,5,6];
-		var tally = [];
-		var duh;
-		
-		for(duh=0;duh<layerTest.length;duh++) {
-			if($coords.z == duh) {
-				if(!tally[duh]) {tally[duh] = 0;}
-				output += $coords.x + "#" + $coords.y + "#" + $coords.z + ":0:" + tally[duh]++ + "<br>";
-			}
+	
+	var $helpers = {};
+	$helpers.isNodeThere = function(coords, isColumn) {
+		if(isColumn && cortex.grid[coords.x] !== undefined && cortex.grid[coords.x][coords.y] !== undefined && cortex.grid[coords.x][coords.y][coords.z] instanceof cortex.Column) { 
+			return true;
+		} else if(cortex.grid[coords.x] !== undefined && cortex.grid[coords.x][coords.y] !== undefined && cortex.grid[coords.x][coords.y][coords.z] !== undefined) { 
+			return true;
 		}
-
+		return false; 
+	};
+	$helpers.stringifyCoords = function(coords,delineator) {
+		var keys = Object.keys(coords);
+		var coordsString = "";
+		var i;
+		delineator = delineator || '';
+		for(i=0;i<keys.length;i++) {
+			coordsString += coords[keys[i]] + delineator;
+		}
+		return coordsString;
+	};
+	$helpers.dupQuant = [];
+	$helpers.isDup = function(coords,checkId) {
+		var coordsString = $helpers.stringifyCoords(coords,"#");
+		if(checkId === undefined) {
+			checkId = 10;
+		}
+		if(dupObj[checkId] === undefined) {
+			dupObj[checkId] = {};
+			dupObj[checkId].duplicates = 0;
+			dupObj[checkId].dupList = [];
+			dupObj[checkId].tested = {};
+		}
+		if(dupObj[checkId].tested[coordsString] === undefined) {
+			dupObj[checkId].tested[coordsString] = true;
+			return false;
+		} else {
+			dupObj[checkId].duplicates++;
+			dupObj[checkId].dupList.push(coordsString);
+			return true;
+		}
+	};
+	$helpers.stopOn = function(testCoords, selfCoords, context) {
+		var thisCoords = $helpers.stringifyCoords(selfCoords,"#");
+		if(thisCoords === testCoords) {
+			alert("Stop!\n" + "Current node: " + thisCoords + "; Context: " + context);
+			console.log("You are here: " + thisCoords, selfCoords, "; context: ", context);
+		}
+	};
+	
+	cortex.Column = function($coords) {
+		"use strict";
+		var self = this;
+		var data = {};		
+		
+		self.helpers = $helpers;
+		// Easy external access for node coords:
 		self.coords = $coords;
 		
 		// Get surrounding nodes:	
-		var neighbors = function(coords) {
-			var i;
-			var x;
-			var y;
-			var z;
-			var iLength;
-			this.initNeighborKeys = Object.keys($config.neighbors);
-			this.neighborKeys = [];
-			this.neighbors = {};
-			for(i=0, iLength = this.initNeighborKeys.length; i < iLength; i++) {
-				x = coords.x + $config.neighbors[this.initNeighborKeys[i]][0];
-				y = coords.y + $config.neighbors[this.initNeighborKeys[i]][1];
-				if(x > $config.breakPoints.low && 
-					x < $config.breakPoints.high &&
-					y > $config.breakPoints.low && 
-					y < $config.breakPoints.high) 
-				{
-					this.neighbors[this.initNeighborKeys[i]] = {};
-					this.neighbors[this.initNeighborKeys[i]].x = x;
-					this.neighbors[this.initNeighborKeys[i]].y = y;
-					this.neighbors[this.initNeighborKeys[i]].z = coords.z;
-					this.neighbors[this.initNeighborKeys[i]].confirmed = false;
-					this.neighborKeys.push(this.initNeighborKeys[i]);
-				}
-			}
-			this.parent = {
+		self.neighborhood = (function(coords) {
+			"use strict";
+			var hood = {};
+			hood.hippocampus = false;
+			hood.parent = {
 				x: Math.floor(coords.x/2),
 				y: Math.floor(coords.y/2),
 				z: coords.z + 1
 			};
-			this.children = [];
-		};
-		self.neighborhood = new neighbors(self.coords);
-		self.connections = new getConnections();
-		self.connections.checkNeighbors();
+			hood.children = [];
+			hood.neighbors = (function() {
+				var sibs = {};
+				var initNeighborKeys = Object.keys($config.neighbors);
+				var x;
+				var y;
+				var i;
+				var iLength;
+				var amITheHippocampus = (function() {
+					var countDown = initNeighborKeys.length;
+					return function() { 
+						--countDown;
+						if(countDown === 0 && hood.children.length === 1) {
+							hood.hippocampus = true;
+						}
+					};
+				})();
+				for(i=0, iLength = initNeighborKeys.length; i < iLength; i++) {
+					x = coords.x + $config.neighbors[initNeighborKeys[i]][0];
+					y = coords.y + $config.neighbors[initNeighborKeys[i]][1];
+					if(
+						// If not the base layer, return a neighbor in every direction:
+						coords.z !== 0 || (
+						// If base layer, only return neighbors in directions within confines of config:
+						x > $config.breakPoints.low && 
+						x < $config.breakPoints.high &&
+						y > $config.breakPoints.low && 
+						y < $config.breakPoints.high
+						)) 
+					{
+						sibs[initNeighborKeys[i]] = {};
+						sibs[initNeighborKeys[i]].x = x;
+						sibs[initNeighborKeys[i]].y = y;
+						sibs[initNeighborKeys[i]].z = coords.z;
+						(function(i) {
+							var timeout = 50;
+							var cycleCount = 0;
+							function neighborCheckIntervol() {
+								setTimeout(function() {
+									if(cycleCount === timeout) {
+										// Timeout ran down. No neighbor found. Discontinue search.
+										delete sibs[initNeighborKeys[i]];
+										amITheHippocampus();
+									} else if(!self.helpers.isNodeThere(sibs[initNeighborKeys[i]])) {
+										// If no node found yet, and time isn't up, check again:
+										neighborCheckIntervol();
+									}
+									cycleCount++;
+								},30);
+							};
+							neighborCheckIntervol();
+						}).call(self,i);
+					};
+				}
+				return sibs;
+			})();
+			return hood;
+		})(this.coords);
+		self.connections = (function() {
+			var connections = {};
+			connections.registerChild = function(childCoords) {
+				self.neighborhood.children.push(childCoords);
+				if(self.neighborhood.children.length === 4){
+					self.propagate.up();
+				}
+// TODO: When to cut extraneous/incomplete parents?
+			};
+			return connections;
+		})();
 		self.propagate = {
 			sideways : function () {
 				var i;
 				var j;
-				var neighborKeys = self.neighborhood.neighborKeys;
+				var neighborKeys = Object.keys(self.neighborhood.neighbors);
 				var totalNeighbors = neighborKeys.length;
 				var totalDimTypes = $config.dimensionTypes.length;
 				var neighborCoords = {};
@@ -128,155 +212,67 @@ var Cortex = function() {
 				} else {
 					// If no column is started, get it started.
 					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z] = new cortex.Column(self.neighborhood.parent);
-					self.propagate.up();
+					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].connections.registerChild(self.coords);
+					// self.propagate.up();
 				}
 			}
 		};
-		function getConnections() {
-			var connections = this;
-			var connectionCycle = {};
-			var neighbors = self.neighborhood.neighbors;
-			var neighborKeys = self.neighborhood.neighborKeys;
-			var totalUnconfirmedNeighbors = neighborKeys.length;
-			connections.checkNeighbors = function() {
-				var g;
-				for(g = 0; g < totalUnconfirmedNeighbors; g++) {
-					(function(g) {
-						var timeout = 50;
-						var cycleCount = 0;
-						function neighborCheckIntervol() {
-							setTimeout(function() {
-								if(self.helpers.isNodeThere(neighbors[neighborKeys[g]])) {
-									self.neighborhood.neighbors[neighborKeys[g]].confirmed = true;
-									if(checkinComplete()) {
-										// TODO: Do we actually need this anymore?
-									}
-								} else {
-									neighborCheckIntervol();
-								}
-								cycleCount++;
-							},300);
-						};
-						neighborCheckIntervol();
-						// connectionCycle[neighborKeys[g]] = ;
-					}).call(this,g);
-				}
-				function checkinComplete() {
-					totalUnconfirmedNeighbors--;
-					if(totalUnconfirmedNeighbors === 0) {
-						return true;
-					}
-					return false;
-				}
-			};
-			connections.registerChild = function(childCoords) {
-				var i;
-				for(i=0;i<self.neighborhood.children.length;i++) {
-					
-				}
-				if(self.helpers.isDup(childCoords,2)) {
-					console.log("registering the same child twice. Child:",childCoords);
-				};
-				self.neighborhood.children.push(childCoords);
-				if(self.neighborhood.children.length === 4){
-					self.propagate.up();
-				}
-				// TODO: When to cut extraneous/incomplete parents?
-			};
-		};
-		self.helpers = {
-			isNodeThere : function(coords, isColumn) {
-				if(isColumn && cortex.grid[coords.x] !== undefined && cortex.grid[coords.x][coords.y] !== undefined && cortex.grid[coords.x][coords.y][coords.z] instanceof cortex.Column) { 
-					return true;
-				} else if(cortex.grid[coords.x] !== undefined && cortex.grid[coords.x][coords.y] !== undefined && cortex.grid[coords.x][coords.y][coords.z] !== undefined) { 
-					return true;
-				}
-				return false; 
-			},
-			stringifyCoords: function(coords) {
-				var keys = Object.keys(coords);
-				var coordsString = "";
-				var i;
-				for(i=0;i<keys.length;i++) {
-					coordsString += coords[keys[i]] + "#";
-				}
-				return coordsString;
-			},
-			dupQuant: [],
-			isDup: function(coords,checkId) {
-				var coordsString = this.stringifyCoords(coords);
-				if(checkId === undefined) {
-					checkId = 10;
-				}
-				if(dupObj[checkId] === undefined) {
-					dupObj[checkId] = {};
-					dupObj[checkId].duplicates = 0;
-					dupObj[checkId].dupList = [];
-					dupObj[checkId].tested = {};
-					
-				}
-				if(dupObj[checkId].tested[coordsString] === undefined) {
-					dupObj[checkId].tested[coordsString] = true;
-					return false;
-				} else {
-					dupObj[checkId].duplicates++;
-					dupObj[checkId].dupList.push(coordsString);
-					return true;
-				}
-			}
-		};
+
+
+
+
 		
-		self.levels = [];
-		self.Pattern = function(data, direction){
+		data.counter = 0;
+		data.levels = [];
+		data.Pattern = function(data, direction){
 			this.direction = direction;
 			this.matched = false;
 			this.currentCoordinates = coordinates;
 			this.data = data;
 		};
-        self.getNextIndex = (function() {
+        data.getNextIndex = (function() {
 		   var id = 0;
 		   return function() { return id++; };
 		})();
-		self.purgeColumn = function() {
-			for(var i;i < self.totalLevels; i++) {
-				self.level[i].purge();
+		data.purgeColumn = function() {
+			for(var i;i < data.totalLevels; i++) {
+				data.level[i].purge();
 			}
 		};
-		self.startRhythm = function() {
+		data.startRhythm = function() {
 			
 		};
-		
 		// Data entry level
-		counter = self.getNextIndex();
-		self.levels[counter] =	function(incoming) {
+		data.counter = data.getNextIndex();
+		data.levels[data.counter] =	function(incoming) {
 			startTimer();
 			pattern = new Pattern(incoming, 1);
 			this.purge = function() {
 								
 			};
-			self.levels[counter + incoming.direction](incoming);
+			data.levels[data.counter + incoming.direction](incoming);
 		};
 			
 		// // Passes up the pattern
-		// counter = self.getNextIndex();
-		// self.levels[counter] =	function(incoming) {
+		// data.counter = data.getNextIndex();
+		// data.levels[data.counter] =	function(incoming) {
 			// this.purge = function() {
 			// };
-			// self.levels[counter + incoming.direction](incoming);
+			// data.levels[data.counter + incoming.direction](incoming);
 		// };
 	
 		// Passes up the pattern
-		counter = self.getNextIndex();
-		self.levels[counter] =	function(incoming) {
+		data.counter = data.getNextIndex();
+		data.levels[data.counter] =	function(incoming) {
 			this.purge = function() {
 								
 			};
-			self.levels[counter + incoming.direction](incoming);
+			data.levels[data.counter + incoming.direction](incoming);
 		};
 	
 		// Tests if the incoming pattern matches a previous pattern
-		counter = self.getNextIndex();
-		self.levels[counter] =	function(incoming) {
+		data.counter = data.getNextIndex();
+		data.levels[data.counter] =	function(incoming) {
 			var fromBelow = null;
 			var fromAbove = null;
 			this.purge = function() {
@@ -289,10 +285,10 @@ var Cortex = function() {
 				if(fromAbove && fromBelow) {
 					if(fromAbove == fromBelow) {
 						alert("Pattern recognized");
-						window['Cortex'].grid[self.childAddress[i].x][self.childAddress[i].y][self.childAddress[i].z](fromBelow);
+						// window['Cortex'].grid[self.childAddress[i].x][self.childAddress[i].y][self.childAddress[i].z](fromBelow);
 					} else {
 						alert("Pattern not recognized");
-						window['Cortex'].grid[self.parentAddress.x][self.parentAddress.y][self.parentAddress.z](fromBelow);
+						// window['Cortex'].grid[self.parentAddress.x][self.parentAddress.y][self.parentAddress.z](fromBelow);
 					}
 				}
 			}
@@ -303,22 +299,26 @@ var Cortex = function() {
 			}
 			decide();
 		};
-		
-		// 
-		counter = self.getNextIndex();
-		self.levels[counter] =	function(incoming) {
-			
-			self.levels[counter + incoming.direction](incoming);
+		data.counter = data.getNextIndex();
+		data.levels[data.counter] =	function(incoming) {
+			data.levels[data.counter + incoming.direction](incoming);
 		};
-		
-		//
-		counter = self.getNextIndex();
-		self.levels[counter] =	function(incoming) {
-			
-			self.levels[counter + incoming.direction](incoming);
+		data.counter = data.getNextIndex();
+		data.levels[data.counter] =	function(incoming) {
+			data.levels[data.counter + incoming.direction](incoming);
 		};
+		data.totalLevels = data.getNextIndex() - 1;
 		
-		self.totalLevels = self.getNextIndex() - 1;
+		// Halfast logging:
+		var layerTest = [0,1,2,3,4,5,6];
+		var tally = [];
+		var duh;
+		for(duh=0;duh<layerTest.length;duh++) {
+			if($coords.z == duh) {
+				if(!tally[duh]) {tally[duh] = 0;}
+				output += $coords.x + "#" + $coords.y + "#" + $coords.z + ":0:" + tally[duh]++ + "<br>";
+			}
+		}
 	};
 	
 };
