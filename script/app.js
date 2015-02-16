@@ -1,31 +1,39 @@
-var dupObj = {};
-var $config = {
-	breakPoints: {
-		high: 98,
-		low: -1
-	},
-	neighbors: {
-		e: [1,0],			
-		w: [-1,0],			
-		n: [0,1],			
-		s: [0,-1],			
-		ne: [1,1],			
-		nw: [-1,1],			
-		se: [1,-1],			
-		sw: [-1,-1]		
-	},
-	dimensionTypes: ['x','y','z']
-};
-var domHelper = function() {
-	
-};
+// var $W = window;
+// var $D = document;
+// var dupObj = {};
 
 var Cortex = function() {
 	"use strict";
 	var cortex = this;
-	cortex.grid = [];
-	
+	var $config = {};
 	var $helpers = {};
+	var $domBuilder = {};
+	cortex.grid = [];
+	$config.breakPoints = {
+		high: 90,
+		low: -1
+	};
+	$config.neighbors = {
+			e: [1,0],			
+			w: [-1,0],			
+			n: [0,1],			
+			s: [0,-1],			
+			ne: [1,1],			
+			nw: [-1,1],			
+			se: [1,-1],			
+			sw: [-1,-1]		
+	};
+	$config.dimensionTypes = ['x','y','z'];
+	$config.timeout = {
+		parent: {
+			intervols: 20,
+			delay: 30
+		},
+		neighbors: {
+			intervols: 10,
+			delay: 25
+		}
+	};
 	$helpers.isNodeThere = function(coords, isColumn) {
 		if(isColumn && cortex.grid[coords.x] !== undefined && cortex.grid[coords.x][coords.y] !== undefined && cortex.grid[coords.x][coords.y][coords.z] instanceof cortex.Column) { 
 			return true;
@@ -44,27 +52,33 @@ var Cortex = function() {
 		}
 		return coordsString;
 	};
-	$helpers.dupQuant = [];
-	$helpers.isDup = function(coords,checkId) {
-		var coordsString = $helpers.stringifyCoords(coords,"#");
-		if(checkId === undefined) {
-			checkId = 10;
-		}
-		if(dupObj[checkId] === undefined) {
-			dupObj[checkId] = {};
-			dupObj[checkId].duplicates = 0;
-			dupObj[checkId].dupList = [];
-			dupObj[checkId].tested = {};
-		}
-		if(dupObj[checkId].tested[coordsString] === undefined) {
-			dupObj[checkId].tested[coordsString] = true;
-			return false;
-		} else {
-			dupObj[checkId].duplicates++;
-			dupObj[checkId].dupList.push(coordsString);
-			return true;
-		}
+	$helpers.getNode = function(coords) {
+		return cortex.grid[coords.x][coords.y][coords.z];
 	};
+	$helpers.dupQuant = [];
+	$helpers.isDup = (function(coords,checkId) {
+		var dupObj = {};
+		return function(coords,checkId) {
+			var coordsString = $helpers.stringifyCoords(coords,"#");
+			if(checkId === undefined) {
+				checkId = 10;
+			}
+			if(dupObj[checkId] === undefined) {
+				dupObj[checkId] = {};
+				dupObj[checkId].duplicates = 0;
+				dupObj[checkId].dupList = [];
+				dupObj[checkId].tested = {};
+			}
+			if(dupObj[checkId].tested[coordsString] === undefined) {
+				dupObj[checkId].tested[coordsString] = true;
+				return false;
+			} else {
+				dupObj[checkId].duplicates++;
+				dupObj[checkId].dupList.push(coordsString);
+				return true;
+			}
+		};
+	})();
 	$helpers.stopOn = function(testCoords, selfCoords, context) {
 		var thisCoords = $helpers.stringifyCoords(selfCoords,"#");
 		if(thisCoords === testCoords) {
@@ -72,17 +86,22 @@ var Cortex = function() {
 			console.log("You are here: " + thisCoords, selfCoords, "; context: ", context);
 		}
 	};
-	
+	$domBuilder.addNode = function() {
+		
+	};
 	cortex.Column = function($coords) {
 		"use strict";
 		var self = this;
+		self.config = $config;
+		self.helpers = $helpers;
 		// Easy external access for node coords:
 		self.coords = $coords;
 		// Object to hold build mechanisms:
-		self.build = {};
+		self.builder = {};
 		// Object for routing incoming data:
 		self.router = {};		
 		// Get surrounding nodes:	
+		$helpers.isDup($coords);
 		self.neighborhood = (function(coords) {
 			"use strict";
 			var hood = {};
@@ -93,6 +112,7 @@ var Cortex = function() {
 				z: coords.z + 1
 			};
 			hood.children = [];
+			hood.neighborKeys = [];
 			hood.neighbors = (function() {
 				var sibs = {};
 				var initNeighborKeys = Object.keys($config.neighbors);
@@ -106,6 +126,7 @@ var Cortex = function() {
 						--countDown;
 						if(countDown === 0 && hood.children.length === 1) {
 							hood.hippocampus = true;
+							self.helpers.getNode(self.neighborhood.children[0]).builder.connections.trim();
 							logIt();
 						}
 					};
@@ -128,7 +149,7 @@ var Cortex = function() {
 						sibs[initNeighborKeys[i]].y = y;
 						sibs[initNeighborKeys[i]].z = coords.z;
 						(function(i) {
-							var timeout = 50;
+							var timeout = self.config.timeout.neighbors.intervols;
 							var cycleCount = 0;
 							function neighborCheckIntervol() {
 								setTimeout(function() {
@@ -139,9 +160,11 @@ var Cortex = function() {
 									} else if(!$helpers.isNodeThere(sibs[initNeighborKeys[i]])) {
 										// If no node found yet, and time isn't up, check again:
 										neighborCheckIntervol();
+									} else {
+										hood.neighborKeys.push(initNeighborKeys[i]);
 									}
 									cycleCount++;
-								},30);
+								},self.config.timeout.neighbors.delay);
 							};
 							neighborCheckIntervol();
 						}).call(self,i);
@@ -151,52 +174,132 @@ var Cortex = function() {
 			})();
 			return hood;
 		})(this.coords);
-		self.build.connections = (function() {
+		self.builder.connections = (function() {
 			var connections = {};
 			connections.registerChild = function(childCoords) {
 				self.neighborhood.children.push(childCoords);
 				if(self.neighborhood.children.length === 4){
-					self.build.propagate.up();
+					self.builder.propagate.up();
 				}
 // TODO: When to cut extraneous/incomplete parents?
 			};
+			connections.selfDestruct = function(childQuant) {
+				var i;
+				childQuant = childQuant || self.neighborhood.children.length;
+				if(self.coords.z !== 0) {
+					for(i=0;i<childQuant;i++) {
+						$helpers.getNode(self.neighborhood.children[i]).builder.connections.selfDestruct();
+					}
+				}
+				delete cortex.grid[$coords.x][$coords.y][$coords.z];
+				nodeCountRemoval($coords.z);
+			};
+			connections.trimmed = false;
+			connections.trim = function() {
+				var timeout = self.config.timeout.parent.intervols;
+				var cycleCount = 0;
+				var neighborKeys = self.neighborhood.neighborKeys;
+				var	childQuant;
+				var i;
+				// Ensure trimming only inits once and :
+				if(connections.trimmed === true || $coords.z === 0) {
+					return;
+				} 
+				connections.trimmed = true;
+				// Start your neighbors looking for extraneous nodes:
+				for(i = 0; i < neighborKeys.length; i++) {
+					self.helpers.getNode(self.neighborhood.neighbors[neighborKeys[i]]).builder.connections.trim();
+				}
+				// Start cycle to check for four children, and kill self and children, in otherwise: 
+				function childCheckIntervol() {
+					setTimeout(function() { 
+						childQuant = self.neighborhood.children.length;
+						var i;
+						if(cycleCount === timeout) {
+							// If time has run out to collect children:
+							connections.selfDestruct(childQuant);
+						} else if(childQuant !== 4) {
+							// If no node found yet, and time isn't up, check again:
+							cycleCount++;
+							childCheckIntervol();
+						} else {
+							// If this node has four children, start each of them searching for extraneous nodes on their level:
+							for(i = 0; i < childQuant; i++) {
+								self.helpers.getNode(self.neighborhood.children[i]).builder.connections.trim();
+							}
+						}
+						// This entails that if four children exist before timeout is hit, nothing will happen. 
+					}, self.config.timeout.parent.delay); //$config.buildTimeouts.parent.delay);
+				};
+				childCheckIntervol();
+			};
 			return connections;
 		})();
-		self.build.propagate = {
+		self.builder.propagate = {
 			sideways : function () {
 				var i;
 				var j;
 				var neighborKeys = Object.keys(self.neighborhood.neighbors);
 				var totalNeighbors = neighborKeys.length;
 				var totalDimTypes = $config.dimensionTypes.length;
-				var neighborCoords = {};
 				var positionArray = [];
+				var neighborCoords;
+				var column;
 				// Deal with the peers:
 				for(i=0; i < totalNeighbors; i++) {
 					// for each neighbor address 
-					if(self.neighborhood.neighbors[neighborKeys[i]] !== null) {
-						neighborCoords[neighborKeys[i]] = {};
-						for(j=0; j < totalDimTypes; j++) {
-							neighborCoords[neighborKeys[i]][$config.dimensionTypes[j]] = self.neighborhood.neighbors[neighborKeys[i]][$config.dimensionTypes[j]];
+						neighborCoords = self.neighborhood.neighbors[neighborKeys[i]];
+						// column = buildNode(neighborCoords);
+						if(cortex.grid[neighborCoords.x] === undefined) {
+							cortex.grid[neighborCoords.x] = [];
 						}
-						if(cortex.grid[neighborCoords[neighborKeys[i]].x] === undefined) {
-							cortex.grid[neighborCoords[neighborKeys[i]].x] = [];
+						if(cortex.grid[neighborCoords.x][neighborCoords.y] === undefined) {
+							cortex.grid[neighborCoords.x][neighborCoords.y] = [];
 						}
-						if(cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y] === undefined) {
-							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y] = [];
+						if(cortex.grid[neighborCoords.x][neighborCoords.y][neighborCoords.z] === undefined) {
+							cortex.grid[neighborCoords.x][neighborCoords.y][neighborCoords.z] = {};
+							cortex.grid[neighborCoords.x][neighborCoords.y][neighborCoords.z] = new cortex.Column(neighborCoords);
+							// if($helpers.isNodeThere(neighborCoords, true)) {
+								column = self.helpers.getNode(neighborCoords);
+								column.builder.propagate.sideways();
+								column.builder.propagate.up();
+							// } else {
+								// alert("Rare case. Node hadn't finished building before being called - 1");
+								// setTimeout(self.builder.propagate.sideways,10);
+							// }
 						}
-						if(cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] === undefined) {
-							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] = {};
-							cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z] = new cortex.Column(neighborCoords[neighborKeys[i]]);
-							if($helpers.isNodeThere(neighborCoords[neighborKeys[i]], true)) {
-								cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z].build.propagate.sideways();
-								cortex.grid[neighborCoords[neighborKeys[i]].x][neighborCoords[neighborKeys[i]].y][neighborCoords[neighborKeys[i]].z].build.propagate.up();
-							} else {
-								alert("Rare case. Node hadn't finished building before being called - 1");
-								setTimeout(self.build.propagate.sideways,10);
-							}
-						}
+				}
+				
+				// column = buildGridChain(
+					// cortex.grid
+					// ,neighborCoords
+					// ,$config.dimensionTypes
+					// ,0
+				// );
+				// function buildGridChain(matrixFrag,coords,coordKeys,coordTypeIndex) {
+					// if(matrixFrag[coords[coordKeys[coordTypeIndex]]] === undefined) {
+						// matrixFrag[coords[coordKeys[coordTypeIndex]]] = [];
+						// matrixFrag = matrixFrag[coords[coordKeys[coordTypeIndex]]];
+					// }
+					// if(coordTypeIndex++ < coordKeys.length - 1) {
+						// matrixFrag = buildGridChain(matrixFrag,coords,coordKeys,coordTypeIndex);
+					// } else {
+						// matrixFrag[coords[coordKeys[coordTypeIndex]]] = new cortex.Column(coords);
+					// }
+					// return matrixFrag;
+				// }
+				function buildNode(coords) {
+					if(cortex.grid[coords.x] === undefined) {
+							cortex.grid[coords.x] = [];
 					}
+					if(cortex.grid[coords.x][coords.y] === undefined) {
+						cortex.grid[coords.x][coords.y] = [];
+					}
+					if(cortex.grid[coords.x][coords.y][coords.z] === undefined) {
+						cortex.grid[coords.x][coords.y][coords.z] = {};
+						cortex.grid[coords.x][coords.y][coords.z] = new cortex.Column(coords);
+					}
+					return cortex.grid[coords.x][coords.y][coords.z];
 				}
 			},
 			// Deal with the parents
@@ -204,31 +307,30 @@ var Cortex = function() {
 				if($helpers.isNodeThere(self.neighborhood.parent) &&
 				$helpers.isNodeThere(self.neighborhood.parent, true)) {
 					// If parent node is built out and ready, register this child with it.
-					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].build.connections.registerChild(self.coords);
+					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].builder.connections.registerChild(self.coords);
 				} else if($helpers.isNodeThere(self.neighborhood.parent)) {
 					// If the parent node is currently building, wait a moment, then try again.
 					alert("Rare case. Node hadn't finished building before being called - 0");
-					self.build.propagate.up();
+					self.builder.propagate.up();
 				} else {
 					// If no column is started, get it started.
 					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z] = new cortex.Column(self.neighborhood.parent);
-					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].build.connections.registerChild(self.coords);
+					cortex.grid[self.neighborhood.parent.x][self.neighborhood.parent.y][self.neighborhood.parent.z].builder.connections.registerChild(self.coords);
 				}
 			}
 		};
 
 
 		// Halfast logging:
-		var layerTest = [0,1,2,3,4,5,6];
-		var tally = [];
-		var duh;
-		for(duh=0;duh<layerTest.length;duh++) {
-			if($coords.z == duh) {
-				if(!tally[duh]) {tally[duh] = 0;}
-				output += $helpers.stringifyCoords($coords,"#"); + tally[duh]++ + "<br>";
-			}
+		if(zTotals[$coords.z] === undefined) {
+			zTotals[$coords.z] = 1;
+		} else {
+			zTotals[$coords.z]++;
 		}
-
+		outputString += $helpers.stringifyCoords($coords,"#") + "<br>";        	
+		function nodeCountRemoval(z) {
+			zTotals[z]--;
+		}
 
 
 		// Data processing mechanisms:		
@@ -315,10 +417,13 @@ var Cortex = function() {
 	
 };
 
-var output = "";
+var zTotals = {};
+var outputString = "";
 function logIt() {
-	document.write(output);
-	 console.log(window.Cortex.grid);
+	document.write(outputString);
+	console.log(window.Cortex.grid);
+	console.log("Totals by layer:");
+	console.log(zTotals);
 };
 
 // Init:
@@ -326,6 +431,6 @@ window['Cortex'] = new Cortex();
 window['Cortex'].grid[0] = []; 
 window['Cortex'].grid[0][0] = [];
 window['Cortex'].grid[0][0][0] = new window['Cortex'].Column({x:0,y:0,z:0});
-window['Cortex'].grid[0][0][0].build.propagate.sideways();
-window['Cortex'].grid[0][0][0].build.propagate.up();
+window['Cortex'].grid[0][0][0].builder.propagate.sideways();
+window['Cortex'].grid[0][0][0].builder.propagate.up();
 
